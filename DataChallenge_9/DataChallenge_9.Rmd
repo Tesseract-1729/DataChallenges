@@ -1,0 +1,135 @@
+---
+title: "Data Challenge 9"
+output: html_document
+date: "2026-10-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
+```
+
+# Data Challenge 9
+
+```{r}
+# import delle librerie
+library(tidyverse)
+```
+
+## Recupero dei dati dalla fonte
+I dati sono contenuti in file csv di cui abbiamo il link. Tali link seguono una struttura fissa quindi, per ottenerli tutti, basta cambiare la stagione e unire tutte le tabelle.
+
+```{r}
+
+url <- "https://www.football-data.co.uk/mmz4281/2526/I1.csv"
+
+matches <- read_csv(url, show_col_types = FALSE) |>
+  select(Date, HomeTeam, AwayTeam, FTHG, FTAG) |>
+  filter(!is.na(Date))
+
+matches
+
+```
+
+```{r}
+
+anni <- 1993:2026
+stagioni <- paste0(
+  sprintf("%02d", anni %% 100),
+  sprintf("%02d", (anni + 1) %% 100)
+)
+
+matches <- purrr::map_dfr(stagioni, function(stagione) {
+
+  url <- paste0("https://www.football-data.co.uk/mmz4281/", stagione, "/I1.csv")
+
+  tryCatch({
+    read_csv(url, show_col_types = FALSE) |>
+      select(Date, HomeTeam, AwayTeam, FTHG, FTAG) |>
+      filter(!is.na(Date))
+  }, error = function(e) {
+    NULL
+  })
+})
+
+matches
+
+```
+
+## Tidy del dataset
+Aggiungiamo una colonna che descrive chi ha vinto (H per casa, A per gli ospiti, P per il pareggio).
+
+```{r}
+
+df1 <- matches |>
+  mutate(outcome = case_when(
+    FTHG > FTAG ~ "H",
+    FTHG < FTAG ~ "A",
+    FTHG == FTAG ~ "P"
+  ))
+df1
+
+```
+
+## Creazione del dataframe di nostro interesse
+Creiamo due dataset e uniamoli.
+
+```{r}
+
+df2 <- df1 |>
+  group_by(HomeTeam, outcome) |>
+  summarise(count = n()) |>
+  pivot_wider(names_from = outcome, values_from = count) |>
+  rename(squadra = HomeTeam, vittorie_in_casa = H, sconfitte_in_casa = A, pareggi_in_casa = P)
+df2
+
+```
+
+```{r}
+
+df3 <- df1 |>
+  group_by(AwayTeam, outcome) |>
+  summarise(count = n()) |>
+  pivot_wider(names_from = outcome, values_from = count) |>
+  rename(squadra = AwayTeam, vittorie_fuori_casa = A, sconfitte_fuori_casa = H, pareggi_fuori_casa = P)
+df3
+
+```
+
+```{r}
+
+df4 <- inner_join(df2, df3, join_by(squadra))
+df4
+
+```
+
+Alcuni valori non sono presenti. In questo caso significa che dobbiamo mettere zero in tali posizioni (per esempio, l'Ancona ha NA in vittorie fuori casa perché le vittorie fuori casa sono zero).
+
+```{r}
+
+df5 <- df4 |>
+  mutate(across(everything(), ~replace_na(.x, 0)))
+df5
+
+```
+
+## Aggiunta delle statistiche
+Aggiungiamo le colonne con le statistiche di nostro interesse ed eliminiamo le colonne non più necessarie.
+
+```{r}
+
+df6 <- df5 |>
+  mutate(vittorie = vittorie_in_casa + vittorie_fuori_casa) |>
+  mutate(sconfitte = sconfitte_in_casa + sconfitte_fuori_casa) |>
+  mutate(pareggi = pareggi_in_casa + pareggi_fuori_casa) |>
+  mutate(partite = vittorie + sconfitte + pareggi) |>
+  mutate(punti = 3 * vittorie + pareggi) |>
+  mutate(punti_per_partita = punti / partite) |>
+  select(squadra, partite, vittorie, sconfitte, punti, punti_per_partita)
+df6
+
+```
+
+## Possibili domande a cui i dati potrebbero rispondere
+- Domanda 1: Quali sono state le squadre più forti (col maggiore punteggio) su tutto l'arco temporale? Quali le più deboli?
+- Domanda 2: Giocare in casa o fuori casa influenza la vittoria/sconfitta? Ci sono squadre più o meno sensibili a questo aspetto (giocare in casa o essere ospiti)?
+- Domanda 3: Sfruttando le date delle partite, come si sono evolute le carriere delle diverse squadre nel tempo?

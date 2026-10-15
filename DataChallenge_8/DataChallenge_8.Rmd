@@ -1,0 +1,105 @@
+---
+title: "Data Challenge 8"
+output: html_document
+date: "2026-10-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
+```
+
+# Tidy del dataset Who
+
+```{r}
+library(tidyr)
+library(dplyr)
+#who
+```
+## Gathering del dataset
+Le (molte) colonne del dataset che iniziano con "new" non rappresentano variabili, bensì il valore della tipologia di tubercolosi diagnosticata. Riarrangiamo il dataset per eliminare questa problematica.
+
+```{r}
+
+who1 <- who |> 
+  pivot_longer(starts_with("new"), names_to = "key", values_to = "cases", values_drop_na = TRUE)
+who1
+
+```
+
+## Cambio nomi variabili
+Alcune delle colonne si chiamavano "newrel..." invece di "new_rel". Modifichiamo le stringhe senza il carattere di underscore per avere valori coerenti.
+
+```{r}
+
+who2 <- who1 |> 
+  mutate(key = stringr::str_replace(who1$key, "newrel", "new_rel"))
+who2
+
+```
+
+## Separazione della colonna key in più variabili
+Le informazioni contenute nella colonna key possono essere scisse in diverse variabili più utili e significative.
+
+```{r}
+
+who3 <- who2 |>
+  separate(key, into = c("new", "type", "sexage"), sep = "_")
+who3
+
+who4 <- who3 |>
+  separate(sexage, into = c("sex", "age"), sep = 1)
+who4
+
+who5 <- who4 |>
+  mutate(age = stringr::str_replace(age, "014", "0014")) |>
+  mutate(age = stringr::str_replace(age, "65", "65100")) |>
+  separate(age, into = c("age_low", "age_high"), sep = 2)
+who5
+
+```
+
+## Eliminazione colonne ridondanti
+Per i nostri scopi, non siamo interessati a conservare le colonne con le codifiche ISO dei Paesi. Inoltre, la colonna "new" contiene solo la stringa "new".
+
+```{r}
+who5 |>
+  distinct(new)
+```
+
+```{r}
+
+who6 <- who5 |>
+  select(-new, -iso2, -iso3)
+who6
+
+```
+
+## Riassegnazione tipi
+Nel processo di modifica abbiamo generato delle variabili che probabilmente non hanno il tipo più adatto per una successiva analisi. Modifichiamoli.
+
+```{r}
+
+who7 <- who6 |>
+  mutate(across(c("year", "age_low", "age_high", "cases"), as.integer))
+who7
+
+```
+
+## Uso di un'unica pipe
+Volendo possiamo compattare il tutto in un'unica pipeline.
+
+```{r}
+
+who8 <- who |>
+  pivot_longer(starts_with("new"), names_to = "key", values_to = "cases", values_drop_na = TRUE) |>
+  mutate(key = stringr::str_replace(who1$key, "newrel", "new_rel")) |>
+  separate(key, into = c("new", "type", "sexage"), sep = "_") |>
+  separate(sexage, into = c("sex", "age"), sep = 1) |>
+  mutate(age = stringr::str_replace(age, "014", "0014")) |>
+  mutate(age = stringr::str_replace(age, "65", "65100")) |>
+  separate(age, into = c("age_low", "age_high"), sep = 2) |>
+  select(-new, -iso2, -iso3) |>
+  mutate(across(c("year", "age_low", "age_high", "cases"), as.integer))
+who8
+
+```
