@@ -1,0 +1,250 @@
+---
+title: "Data Challenge 14"
+output: html_document
+date: "2026-10-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+# Analisi dati sui risultati di partite di scacchi
+
+```{r}
+df <- read.csv("data.csv")
+```
+
+## C'è un vantaggio a giocare per primi?
+Contiamo in quante partite ha vinto il bianco, in quante il nero e in quante si è pareggiato.
+
+```{r}
+
+df2 <- df |>
+  group_by(Score) |>
+  summarize(count = n())
+df2
+```
+Escludendo le patte, restano 36387 partite, di cui 21163 vinte dal bianco e 15224 dal nero.
+Semplificando, supponiamo che le variabili casuali che descrivono la vittoria del bianco siano indipendenti e identicamente distribuite.
+Testiamo l'ipotesi nulla: la probabilità di vittoria del bianco è 50%.
+
+```{r}
+
+prop.test(21163, 36387, p = 0.5, correct = FALSE)
+
+```
+Un p-value così basso porta a rifiutare l'ipotesi nulla, dunque sembra esistere un vantaggio a giocare per primi, essendo il numero delle vittorie del bianco maggiore di quello relativo alle vittorie del nero.
+
+## Distribuzione dei punteggi
+
+Assegnamo ai giocatori un punto per le vittorie, mezzo per le patte e zero per le sconfitte.
+
+```{r}
+
+df3 <- df |>
+  group_by(White) |>
+  summarise(punti = sum(Score))
+df3
+
+```
+
+```{r}
+
+df4 <- df |>
+  mutate(InvScore = 1 - Score) |>
+  group_by(Black) |>
+  summarise(punti = sum(InvScore))
+df4
+
+```
+
+```{r}
+
+# a questo dataset mancano i giocatori che hanno giocato solo col bianco o solo col nero
+df5 <- full_join(df3, df4, join_by(White == Black)) |>
+  mutate(punti = punti.x + punti.y) |>
+  select(White, punti) |>
+  rename(giocatore = White)
+df5
+
+```
+
+```{r}
+
+df6 <- anti_join(df3, df4, join_by(White == Black)) |>
+  select(White, punti) |>
+  rename(giocatore = White)
+df7 <- anti_join(df4, df3, join_by(Black == White)) |>
+  select(Black, punti) |>
+  rename(giocatore = Black)
+
+# questo invece contiene tutti i giocatori
+df8 <- df5 |>
+  union(df6) |>
+  union(df7) |>
+  mutate(punti = replace_na(punti, 0)) |>
+  group_by(giocatore) |>
+  summarise(somma = sum(punti)) |>
+  arrange(giocatore) |>
+  rename(punti = somma)
+df8
+
+```
+
+Possiamo ora guardare l'istogramma delle frequenze:
+
+```{r}
+
+ggplot(data = df8) +
+  geom_histogram(mapping = aes(x = punti), binwidth = 0.5) +
+  theme_bw()
+  
+```
+
+La distribuzione è asimmetrica, probabilmente perché molti giocatori hanno giocato solo pochissime partite o ne hanno comunque vinte poche rispetto a quei pochi giocatori che vincono spesso.
+
+## La somma dei punti ELO è sempre zero
+Dimostrazione.
+Procediamo per induzione sul numero n di partite giocate:
+- Caso base: $n = 0$, visto che nessuna partita è ancora stata giocata e i giocatori partono tutti con ELO zero, allora la somma degli ELO dei giocatori è zero.
+
+- Passo induttivo: Supponiamo per ipotesi induttiva che per $n = \lambda$ la somma degli ELO di tutti i giocatori sia zero; dimostriamo che essa è pari a 0 anche per $n = \lambda + 1$. Sia la $(\lambda + 1)$-esima partita giocata tra il giocatore $i$ e il giocatore $j$, siano inoltre $r_i$ e $r_j$ i loro ELO prima dello scontro, consideriamo la somma dei loro ELO dopo lo scontro. Essa vale:
+$$r_i + \kappa (s_{i,j} - \mu_{i,j}) + r_j + \kappa (s_{j,i} - \mu_{j,i}) = r_i + r_j + \kappa ((s_{i,j} + s_{j,i}) - (\mu_{i,j} + \mu_{j,i})) = r_i + r_j + \kappa (1 - 1) = r_i + r_j$$
+e dunque la somma degli ELO resta invariata tra prima e dopo lo scontro. La somma degli ELO di tutti i giocatori resta dunque zero.
+
+## Calcolo dei punteggi ELO dei giocatori
+```{r}
+# Inizialmente hanno tutti 0 punti
+df9 <- df8 |>
+  mutate(punti = 0) |>
+  rename(elo = punti);
+
+# Poi vedo tutte le partite e aggiorno i punteggi elo
+for (i in seq_len(nrow(df))) {
+
+  bianco <- df$White[i]
+  nero   <- df$Black[i]
+  score  <- df$Score[i]
+
+  # Trova le righe dei due giocatori
+  index_bianco <- match(bianco, df9$giocatore)
+  index_nero <- match(nero, df9$giocatore)
+
+  # Elo prima dello scontro
+  R_bianco <- df9$elo[index_bianco]
+  R_nero <- df9$elo[index_nero]
+
+  # Punteggio atteso del bianco
+  E_bianco <- 1 / (1 + 10^((R_nero - R_bianco) / 400))
+
+  # Aggiorna entrambi gli Elo
+  variazione <- 25 * (score - E_bianco)
+  df9$elo[index_bianco] <- R_bianco + variazione
+  df9$elo[index_nero] <- R_nero - variazione
+}
+
+df9
+
+```
+
+Possiamo tracciare l'istogramma dei punteggi elo:
+```{r}
+
+ggplot(data = df9) +
+  geom_histogram(mapping = aes(x = elo), binwidth = 1) +
+  theme_bw()
+  
+```
+La distribuzione dei punteggi elo è diversa da quella dei punteggi perché i due approcci al punteggio sfruttano formule molto diverse (una banale somma nei punteggi, una formula basata sulla funzione logistica negli elo). Innanzitutto perché per gli elo abbiamo anche numeri negativi e inoltre sembra molto meno concentrata. ELO infatti permette anche a giocatori che hanno fatto poche partite di non avere punteggi infimi.
+
+Verifichiamo che la somma è zero:
+```{r}
+sum(df9$elo)
+```
+A causa delle approssimazioni non è esattamente zero, tuttavia è prossima alla precisione macchina.
+
+## Legame tra punti classici e elo
+Costruiamo il dataset che contenga entrambi i punteggi:
+```{r}
+df10 <- inner_join(df8, df9, join_by(giocatore))
+df10
+```
+
+Creiamo un grafico per studiare la correlazione tra punti e elo:
+```{r}
+
+ggplot(data = df10, mapping = aes(x = punti, y = elo)) + 
+  geom_point() +
+  geom_smooth()
+
+```
+Dal grafico si vede che a elo più alti corrispondono anche punteggi più alti. Ciò è anche più visibile passando a scale logaritmiche:
+```{r}
+
+ggplot(data = df10, mapping = aes(x = log(punti), y = log(elo))) + 
+  geom_point() +
+  geom_smooth()
+
+```
+I coefficienti di correlazione di Pearson, Spearmann e Kendall valgono:
+```{r}
+cor.test(df10$punti, df10$elo, method = "pearson")
+cor.test(df10$punti, df10$elo, method = "spearman")
+cor.test(df10$punti, df10$elo, method = "kendall")
+```
+Dai quali emerge quindi una correlazione positiva trai due punteggi.
+
+Vediamo se i giocatori più forti nell'uno e nell'altro punteggio sono gli stessi:
+
+```{r}
+
+df11 <- df10 |> 
+  arrange(desc(punti)) |> 
+  head(100);
+df12 <- df10 |>
+  arrange(desc(elo)) |>
+  head(100);
+df13 <- df11 |>
+  intersect(df12);
+righe <- df13 |> nrow();
+righe
+
+```
+Guardando i 100 migliori giocatori in un metodo e i 100 nell'altro scopriamo che solo 53 compaiono in entrambre le top 100: questo significa che non sono eccessivamente discordanti, tuttavia i due metodi portano a classifiche diverse per circa metà (quantomeno nella vetta).
+
+## Dipendenza dal numero di partite giocate
+```{r}
+
+df14 <- df |> select(giocatore = White)
+df15 <- df |> select(giocatore = Black)
+df16 <- bind_rows(df14, df15)
+df17 <- df16 |>
+  group_by(giocatore) |>
+  summarize(partite = n())
+df17
+```
+
+```{r}
+
+df18 <- df10 |>
+  inner_join(df17)
+df18
+
+```
+
+Possiamo ora creare i grafici per capire se punti e elo dipendono dal numero di partite:
+
+```{r}
+ggplot(data = df18, mapping = aes(x = partite, y = punti)) +
+  geom_point()
+```
+I punti presentano una evidente dipendenza lineare dal numero di partite giocate.
+```{r}
+ggplot(data = df18, mapping = aes(x = partite, y = elo)) +
+  geom_point()
+```
+Per gli elo questa dipendenza è molto meno marcata.
