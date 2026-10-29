@@ -1,0 +1,81 @@
+---
+title: "Concentrazione dell'indice S&P 500"
+output: html_document
+date: "2026-10-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+Studiamo la concentrazione dell'indice S&P 500.
+```{r}
+library(tidyverse)
+library(tidyquant)
+library(ineq)
+```
+
+```{r}
+
+best <- tq_index("SP500") |>
+  select(symbol, company, weight)
+best
+
+```
+
+Verifichiamo che la somma dei pesi sia circa 1:
+```{r}
+
+sum(best$weight)
+
+```
+
+## Quanto sono diseguali i pesi delle aziende?
+
+```{r}
+ggplot(data = best, mapping = aes(x = weight)) +
+  geom_histogram(binwidth = 0.0001)
+```
+I pesi spaziano da circa 0 a quasi l'8%, con una enorme presenza di valori bassi. Vediamo se con un grafico logaritmico si comprende meglio la distribuzione:
+```{r}
+ggplot(data = best, mapping = aes(x = log(100 * weight))) +
+  geom_histogram(binwidth = 0.1)
+```
+Esclusi alcuni valori con un peso infinitesimo (10^-15%) ed esclusi pochi valori significativi (> 1%) tutti gli altri valori sono caratterizzati da pesi di diversi ordini di grandezza inferiori (attorno a 0.001%)
+
+## Quale parte dell'indice è rappresentata dalle aziende più grandi?
+
+Le 16 aziende con peso maggiore o uguale all'1% controllano il 46% dell'indice.
+```{r}
+
+best |>
+  filter(weight >= 0.01) |>
+  select(weight) |>
+  summarise(n(), sum(weight))
+
+```
+
+## Cosa dice la curva di Lorenz riguardo alla concentrazione?
+
+```{r}
+lorenz <- Lc(best$weight)
+
+lorenz_df <- data.frame(
+  p = lorenz$p,
+  L = lorenz$L
+)
+
+ggplot(data = lorenz_df, mapping = aes(x = p, y = L)) +
+  geom_line(linewidth = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  theme_bw()
+```
+
+Dal grafico si vede che circa il 10% più ricco controlla il 70% del valore totale.
+
+## Qual è l'indice di Gini della distribuzione dei pesi?
+
+Anche l'indice di Gini (pari a 0.7) conferma quanto osservato, descrivendo una distribuzione piuttosto concentrata.
+```{r}
+Gini(best$weight)
+```
