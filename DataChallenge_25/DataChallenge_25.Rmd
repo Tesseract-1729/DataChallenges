@@ -1,0 +1,271 @@
+---
+title: "Stablecoins"
+output: html_document
+date: "2026-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+Desideriamo effettuare un breve confronto sui trasferimenti di USDT, USDC e DAI sulla blockchain Ethereum.
+
+## Scaricamento dei dati
+
+```{r}
+library(httr2)
+library(tidyverse)
+library(lubridate)
+```
+
+```{r, eval = FALSE}
+
+api_key <- Sys.getenv("ETHERSCAN_API_KEY")
+
+get_block <- function(date, closest = "before") {
+
+  response <- request(
+    "https://api.etherscan.io/v2/api"
+  ) |>
+    req_url_query(
+      chainid = 1,
+      module = "block",
+      action = "getblocknobytime",
+      timestamp = as.integer(
+        as.numeric(as.POSIXct(date, tz = "UTC"))
+      ),
+      closest = closest,
+      apikey = api_key
+    ) |>
+    req_perform()
+
+  result <- resp_body_json(response)
+
+  if (result$status != "1") {
+    stop(result$result)
+  }
+
+  as.numeric(result$result)
+}
+
+```
+
+Scelgo un periodo da considerare
+
+```{r, eval = FALSE}
+
+start_date <- "2026-09-01 00:00:00"
+end_date   <- "2026-10-01 00:00:00"
+
+start_block <- get_block(start_date, "after")
+end_block <- get_block(end_date, "before")
+
+```
+
+Definisco la funzione per scaricare i dati.
+
+```{r, eval = FALSE}
+
+download_transfers <- function(
+    contract,
+    token,
+    start_block,
+    end_block
+) {
+
+  all_data <- list()
+
+  # Divido in blocchi piu' piccoli
+  chunk_size <- 50000
+
+  block_starts <- seq(
+    start_block,
+    end_block,
+    by = chunk_size
+  )
+
+  for (i in seq_along(block_starts)) {
+
+    from_block <- block_starts[i]
+
+    to_block <- min(
+      from_block + chunk_size - 1,
+      end_block
+    )
+
+    page <- 1
+
+    repeat {
+
+      response <- request(
+        "https://api.etherscan.io/v2/api"
+      ) |>
+        req_url_query(
+          chainid = 1,
+          module = "account",
+          action = "tokentx",
+          contractaddress = contract,
+          startblock = from_block,
+          endblock = to_block,
+          page = page,
+          offset = 10000,
+          sort = "asc",
+          apikey = api_key
+        ) |>
+        req_perform()
+
+      result <- resp_body_json(response)
+
+      if (result$status == "0") {
+
+        if (grepl(
+          "no transactions found",
+          result$result,
+          ignore.case = TRUE
+        )) {
+          break
+        }
+
+        stop(result$result)
+      }
+
+      transfers <- map_dfr(
+        result$result,
+        as_tibble
+      )
+
+      all_data[[length(all_data) + 1]] <-
+        transfers
+
+      message(
+        token,
+        " | Block range: ",
+        from_block,
+        " - ",
+        to_block,
+        " | Page: ",
+        page
+      )
+
+      if (nrow(transfers) < 10000) {
+        break
+      }
+
+      page <- page + 1
+
+      Sys.sleep(0.25)
+    }
+
+    Sys.sleep(0.25)
+  }
+
+  bind_rows(all_data) |>
+    mutate(token = token)
+}
+
+```
+
+Scarico i dati di mio interesse:
+
+```{r, eval = FALSE}
+
+usdc <- download_transfers(
+  contract = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  token = "USDC",
+  start_block = start_block,
+  end_block = end_block
+) |>
+  select(timeStamp, value, tokenName, tokenDecimal)
+usdc
+
+```
+
+```{r, eval = FALSE}
+
+usdt <- download_transfers(
+  contract = "0xdac17f958d2ee523a2206206994597c13d831ec7",
+  token = "USDT",
+  start_block = start_block,
+  end_block = end_block
+) |>
+  select(timeStamp, value, tokenName, tokenDecimal)
+usdt
+
+```
+
+```{r, eval = FALSE}
+
+dai <- download_transfers(
+  contract = "0x6b175474e89094c44da98b954eedeac495271d0f",
+  token = "DAI",
+  start_block = start_block,
+  end_block = end_block
+) |>
+  select(timeStamp, value, tokenName, tokenDecimal)
+dai
+
+```
+
+Uniamo i tre dataset in un unico dataset e salviamolo in csv:
+
+```{r, eval = FALSE}
+
+df <- bind_rows(usdc, usdt, dai)
+write_csv(df, "stablecoins.csv")
+
+```
+
+```{r}
+
+df <- read_csv("stablecoins.csv")
+df
+
+```
+
+## Tidy del dataset
+
+Calcoliamo il valore in dollari di ogni transazione:
+```{r}
+
+df1 <- df |>
+  mutate(true_value = value / (10 ^ tokenDecimal)) |>
+  select(-value, -tokenDecimal) |>
+  mutate(tokenName = recode(tokenName,
+                            "Tether USD" = "USDT",
+                            "Dai Stablecoin" = "DAI")) |>
+  rename(ts = timeStamp, valuta = tokenName, importo = true_value) |>
+  mutate(valuta = factor(valuta))
+df1
+
+```
+
+## Differenze tra le dimensioni delle transizioni nelle diverse valute
+
+Ora che abbiamo il dataset ordinato possiamo analizzare le distribuzioni degli importi al variare della valuta.
+
+```{r}
+df1 |> group_by(valuta) |>
+  summarise(median(importo), mean(importo))
+```
+
+```{r}
+ggplot(data = df1, mapping = aes(x = valuta, y = log10(importo))) +
+  geom_boxplot()
+```
+
+Dal grafico e dai valori di media e mediana calcolati sopra emerge che USDC e USDT sono usati per effettuare trasferimenti di importi analoghi, pressoché con la stessa distribuzione. Il DAI viene usato per trasferire importi con una variabilità molto più ampia (da cifre infime a molto consistenti) e presenta una mediana pari circa al triplo delle altre due valute.
+
+## Analisi dei volumi trasferiti
+
+```{r}
+
+df1 |> group_by(valuta) |>
+  summarise(volume_milioni = sum(importo) / 1000000)
+
+```
+
+Gli importi trasferiti nelle tre stablecoins nel mese di settembre 2026 sono molto differenti:
+
+I grandi trasferimenti fatti in DAI si fanno sentire e portano il DAI ad avere un volume trasferito di circa 5.5 miliardi di dollari.
+
+Per quanto riguarda le altre due valute, sebbene gli importi siano quasi equidistibuiti, il USDC ha un volume pari al quadruplo degli USDT. Probabilmente perché più utilizzato.
