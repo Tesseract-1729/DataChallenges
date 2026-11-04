@@ -1,0 +1,65 @@
+---
+title: "Life expectancy"
+output: html_document
+date: "2026-11-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(gapminder)
+library(dplyr)
+library(ggplot2)
+```
+
+## Creazione del dataset
+Siamo interessati a studiare l'andamento dell'aspettativa di vita nei vari continenti al passare del tempo.
+Per calcolare l'aspettativa di vita media in un continente è sufficiente fare una media pesata in base alla popolazione delle aspettative di vita nelle nazioni di quel continente.
+
+```{r}
+df <- gapminder |>
+  mutate(temp1 = pop * lifeExp) |>
+  group_by(continent, year) |>
+  summarise(popolazione = sum(pop), temp2 = sum(temp1)) |>
+  mutate(aspettativa = temp2 / popolazione)
+df
+```
+
+Creiamo il dataset per il mondo intero.
+
+```{r}
+
+mondo <- df |>
+  group_by(year) |>
+  summarise(persone = sum(popolazione), temp3 = sum(temp2)) |>
+  mutate(aspettativa = temp3 / persone)
+mondo
+
+```
+
+Uniamo i due dataset insieme.
+```{r}
+
+df1 <- df |>
+  rename(anno = year, zona = continent) |>
+  select(zona, anno, aspettativa)
+
+df2 <- mondo |>
+  mutate(zona = "World") |>
+  rename(anno = year) |>
+  select(zona, anno, aspettativa)
+
+df3 <- rbind(df1, df2)
+df3
+```
+
+## Rappresentazione di come è cambiata nel tempo l'aspettativa di vita
+```{r}
+
+ggplot(data = df3, mapping = aes(x = anno, y = aspettativa, group = zona, color = zona)) +
+  geom_line(linewidth = 1) +
+  theme_bw()
+
+```
