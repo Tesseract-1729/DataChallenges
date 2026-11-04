@@ -1,0 +1,83 @@
+---
+title: "Diamonds Are Forever"
+output: html_document
+date: "2026-11-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(gapminder)
+library(dplyr)
+library(ggplot2)
+```
+
+## Il dataset
+```{r}
+diamonds
+```
+
+## I diamanti di bassa qualità sembrano costare di più
+```{r}
+
+ggplot(data = diamonds, mapping = aes(x = cut, y = price)) +
+  geom_boxplot()
+
+```
+
+```{r}
+
+ggplot(data = diamonds, mapping = aes(x = color, y = price)) +
+  geom_boxplot()
+
+```
+
+```{r}
+
+ggplot(data = diamonds, mapping = aes(x = clarity, y = price)) +
+  geom_boxplot()
+
+```
+
+Effettivamente, guardando le mediane dei prezzi al variare della qualità dei diamanti, si nota che quelli di qualità più alta costano meno (considerando uno qualsiasi dei tre aspetti di garanzia della qualità: cut, clarity e color).
+
+## Cerchiamo una spiegazione a quello che sembra un paradosso
+
+```{r}
+
+model_traits <- lm(
+  price ~
+    #carat +
+    cut +
+    color +
+    clarity,
+  data = diamonds
+)
+summary(model_traits)$r.squared
+
+```
+
+Un R quadro così basso indica che le tre variabili categoriali in esame spiegano solo una piccola parte della variabilità del prezzo. Dunque abbiamo trascurato un'altra variabile importante:
+```{r}
+model_traits2 <- lm(
+  price ~
+    carat,
+  data = diamonds
+)
+summary(model_traits2)$r.squared
+```
+
+La caratura del diamante non può essere ignorata, anche perché solitamente il prezzo dei diamanti si esprime al carato.
+
+```{r}
+ggplot(data = diamonds, mapping = aes(x = carat, y = price)) +
+  geom_point() +
+  geom_abline(slope = model_traits2$coefficients[2],
+              intercept = model_traits2$coefficients[1],
+              color = "red",
+              linewidth = 1)
+```
+
+Anche dal grafico è possibile osservare la rilevanza della caratura nella determinazione del prezzo.
