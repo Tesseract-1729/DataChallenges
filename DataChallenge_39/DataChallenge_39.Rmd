@@ -1,0 +1,255 @@
+---
+title: "Carbon Footprint of Nations"
+output: html_document
+date: "2026-11-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+```
+
+## Analisi dei dati
+
+```{r}
+df <- read_csv("owid-co2-data.csv")
+colnames(df)
+```
+
+```{r}
+df1 <- df |>
+  select(country, iso_code, year, population, gdp,
+         co2, cumulative_co2,
+         coal_co2, gas_co2, oil_co2, other_industry_co2) |>
+  rename(other_co2 = other_industry_co2) |>
+  mutate(co2_pc = co2 / population,
+         coal_co2_pc = coal_co2 / population,
+         gas_co2_pc = gas_co2 / population,
+         oil_co2_pc = oil_co2 / population) |>
+  mutate(other_co2 = co2 - (coal_co2 + gas_co2 + oil_co2)) |>
+  mutate(other_co2_pc = other_co2 / population)
+df1
+```
+
+```{r}
+ggplot(data = df1, mapping = aes(x = log10(gdp), y = log10(co2), color = year)) +
+  geom_point(alpha = 0.5)
+```
+
+```{r}
+ggplot(data = df1, mapping = aes(x = log10(oil_co2))) +
+  geom_boxplot()
+
+ggplot(data = df1, mapping = aes(x = log10(coal_co2))) +
+  geom_boxplot()
+
+ggplot(data = df1, mapping = aes(x = log10(gas_co2))) +
+  geom_boxplot()
+
+ggplot(data = df1, mapping = aes(x = log10(other_co2))) +
+  geom_boxplot()
+```
+
+Non siamo interessati alle righe che non rappresentano degli stati. Raggruppo i dati a gruppi di 25 anni per ogni nazione, sostituendo alle colonne numeriche la media dei valori non NA.
+
+```{r}
+df2 <- df1 |>
+  filter(! is.na(iso_code)) |>
+  mutate(century_block = (year - 1750) %/% 25) |>
+  group_by(country, iso_code, century_block) |>
+  summarise(population = mean(population, na.rm = TRUE),
+            gdp = mean(gdp, na.rm = TRUE),
+            co2 = mean(co2, na.rm = TRUE),
+            cumulative_co2 = max(cumulative_co2, na.rm = TRUE),
+            coal_co2 = mean(coal_co2, na.rm = TRUE),
+            oil_co2 = mean(oil_co2, na.rm = TRUE),
+            gas_co2 = mean(gas_co2, na.rm = TRUE),
+            other_co2 = mean(other_co2, na.rm = TRUE),
+            co2_pc = mean(co2_pc, na.rm = TRUE),
+            coal_co2_pc = mean(coal_co2_pc, na.rm = TRUE),
+            oil_co2_pc = mean(oil_co2_pc, na.rm = TRUE),
+            gas_co2_pc = mean(gas_co2_pc, na.rm = TRUE),
+            other_co2_pc = mean(other_co2_pc, na.rm = TRUE),
+            )
+df2
+```
+
+```{r}
+df3 <- df2 |>
+  mutate(cumulative_co2 = pmax(cumulative_co2, 0)) |> # Al posto di -Inf metto 0
+  filter(! is.na(co2)) # Non ci interessano i blocchi in cui non abbiamo dati sulla co2
+df3
+```
+
+```{r}
+df3 |> filter(is.na(gdp)) |> nrow()
+```
+
+Visto che per 571 dati su 1266 non abbiamo informazioni sul gdp, scegliamo di escluderlo dalla rappresentazione artistica (e dallo studio).
+
+```{r}
+df4 <- df3 |>
+  select(-gdp)
+df4
+```
+
+```{r}
+ggplot(data = df4, mapping = aes(x = factor(century_block), y = log10(co2_pc))) +
+  geom_boxplot() +
+  theme_bw()
+
+ggplot(data = df4, mapping = aes(x = factor(century_block), y = log10(co2))) +
+  geom_boxplot() +
+  theme_bw()
+```
+
+Si nota un aumento della co2 pro capite al passare del tempo.
+
+```{r}
+ggplot(data = df3, mapping = aes(x = log10(population))) +
+  geom_boxplot()
+```
+
+```{r}
+ggplot(data = df3, mapping = aes(x = log10(co2))) +
+  geom_boxplot()
+```
+
+## Data art
+
+```{r}
+f <- function(x, y) {
+  2 * exp(-(x^2 + y^2)) +
+    exp(-((x - 2)^2 + 2*y^2))
+}
+
+grid <- expand.grid(
+  x = seq(-5, 5, length.out = 300),
+  y = seq(-5, 5, length.out = 300)
+)
+
+grid <- grid |>
+  mutate(z = f(x, y))
+
+ggplot(grid, aes(x = x, y = y, fill = z)) +
+  geom_raster() +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "f(x,y)"
+  ) +
+  coord_equal() +
+  theme_minimal()
+```
+
+```{r}
+df5 <- df4 |>
+  select(country, iso_code, century_block, population, co2_pc, co2) |>
+  na.omit() # Elimino tutte le righe senza popolazione o senza co2_pc o co2
+df5
+```
+
+```{r}
+library(sf)
+library(rnaturalearth)
+```
+
+```{r}
+world <- ne_countries(
+  scale = "medium",
+  returnclass = "sf"
+)
+
+centroids <- world |>
+  st_transform(3857) |>
+  st_point_on_surface() |>
+  st_transform(4326)
+
+coords <- centroids |>
+  mutate(
+    longitude = st_coordinates(geometry)[, 1],
+    latitude  = st_coordinates(geometry)[, 2]
+  ) |>
+  st_drop_geometry() |>
+  select(iso_a3, latitude, longitude)
+
+df6 <- df5 |>
+  left_join(coords, by = c("iso_code" = "iso_a3"))
+df6
+```
+
+```{r}
+ggplot() +
+  geom_sf(
+    data = world,
+    fill = NA,
+    color = "grey50",
+    linewidth = 0.2
+  ) +
+  geom_point(data = df6, mapping = aes(x = longitude, y = latitude)) +
+  theme_void()
+```
+
+```{r}
+library(ggforce)
+```
+
+```{r}
+etichette <- function(x) {
+  a <- 1750 + 25 * as.numeric(as.character(x))
+  b <- a + 24
+  paste0(a, "-", b)
+}
+
+ggplot() +
+  geom_sf(
+    data = world,
+    fill = NA,
+    color = "grey60",
+    linewidth = 0.2
+  ) +
+  geom_circle(data = df6, mapping = aes(
+    x0 = longitude,
+    y0 = latitude,
+    r = 1.5 * (3 + log10(co2)),
+    color = factor(century_block)
+  ),
+  linewidth = 0.6,
+  alpha = 0.1) +
+  scale_color_manual(
+    values = rainbow(length(unique(df6$century_block)) + 1),
+    labels = etichette,
+    name = NULL, #"Historycal period"
+    guide = guide_legend(nrow = 1, ncol = 12, byrow = TRUE) #"none"
+  ) +
+  scale_linewidth_continuous(guide = "none") +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(size = 24, hjust = 0.5),
+    plot.subtitle = element_text(size = 16),
+    plot.title.position = "plot",
+    plot.caption = element_text(hjust = 0.5),
+    plot.caption.position = "plot"
+  ) +
+  labs(
+    title = "Sparkling World",
+    #subtitle = "Subtitle",
+    caption = "Our World in Data - CO2 Data"
+  )
+```
+
+```{r}
+ggsave("SparklingWorld.jpg", width = 16, height = 9, dpi = 300)
+```
+
+## Spiegazione del mapping della data art
+
+### Origine dell'opera
+Per ogni stato del mondo, centrati sul suo territorio, sono riportati 12 cerchi (o meno, in assenza dei dati) corrispondendi a 12 periodi storici da un quarto di secolo l'uno. Il raggio dei cerchi è linearmente proporzionale al logaritmo della quantità di CO2 prodotta.
+
+### Significato
+I numerosi cerchi ricordano le bolle visibili in un bicchiere di acqua frizzante (da cui il titolo dell'opera). Visto che visivamente le bolle diventano sempre più grandi, si percepisce l'aumento di anidride carbonica nell'aria al passare del tempo... Forse potremmo cambiare bevanda preferita, per riuscire a ridurre le bolle.
