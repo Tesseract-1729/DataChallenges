@@ -1,0 +1,116 @@
+---
+title: "Data Challenge 2c"
+output: html_document
+date: "2026-11-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(tidygraph)
+library(ggplot2)
+library(ggraph)
+library(igraph)
+library(corrplot)
+```
+
+## Caricamento dei dati
+
+```{r}
+nodes <- read_csv("dolphin_nodes.csv") |>
+  rename(nomi = name) |>
+  mutate(name = row_number()) |>
+  select(name, nomi, sex)
+
+edges <- read_csv("dolphin_edges.csv") |>
+  mutate(x = as.integer(x)) |>
+  mutate(y = as.integer(y))
+
+nodes
+edges
+
+g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
+plot(g, layout = layout_with_fr(g))
+```
+
+## Tipologia delle relazioni
+
+Cerchiamo di stabilire se le relazioni siano tra individui dello stesso sesso o di sesso opposto.
+
+```{r}
+df <- edges |>
+  inner_join(nodes, join_by(x == name)) |>
+  rename(sex_x = sex) |>
+  select(-nomi) |>
+  inner_join(nodes, join_by(y == name)) |>
+  rename(sex_y = sex) |>
+  select(-nomi) |>
+  mutate(uguali = sex_x == sex_y) |>
+  group_by(uguali) |>
+  summarise(conteggio = n())
+df
+```
+
+Visto che le relazioni tra individui dello stesso sesso sono circa il doppio di quelle tra individui di sesso opposto, ipotizziamo di essere prevalentemente in presenza di relazioni di amicizia.
+
+## Misure di centralità
+
+Calcoliamo diverse misure di centralità (grado, closeness, betweenness, page rank).
+
+```{r}
+g1 <- g |>
+  as_tbl_graph() |>
+  activate(nodes) |>
+  mutate(grado = centrality_degree()) |>
+  mutate(closeness = centrality_closeness()) |>
+  mutate(betweenness = centrality_betweenness()) |>
+  mutate(page_rk = centrality_pagerank(damping = 0.85))
+
+g1
+```
+
+```{r}
+nodi <- as_data_frame(g1, what = "vertices")
+
+ggplot(data = nodi, mapping = aes(x = sex, y = grado)) +
+  geom_boxplot() +
+  theme_bw()
+
+ggplot(data = nodi, mapping = aes(x = sex, y = closeness)) +
+  geom_boxplot() +
+  theme_bw()
+
+ggplot(data = nodi, mapping = aes(x = sex, y = betweenness)) +
+  geom_boxplot() +
+  theme_bw()
+
+ggplot(data = nodi, mapping = aes(x = sex, y = page_rk)) +
+  geom_boxplot() +
+  theme_bw()
+```
+
+Dai grafici possiamo notare che i soggetti di sesso femminile hanno (considerando in particolare la mediana) indici di centralità più alti rispetto ai soggetti di sesso maschile.
+
+## Correlazione tra gli inidici di centralità
+
+```{r}
+dati <- nodi |>
+  select(grado, closeness, betweenness, page_rk)
+
+# Creo la matrice di correlazione
+cor_matrix <- cor(
+  dati,
+  use = "pairwise.complete.obs",
+  method = "pearson"
+)
+```
+
+```{r}
+corrplot(cor_matrix, method = "number")
+```
+
+Notiamo una correlazione positiva tra tutte le misure di centralità. In particolare, la più evidente è quella tra grado e page rank.
+
