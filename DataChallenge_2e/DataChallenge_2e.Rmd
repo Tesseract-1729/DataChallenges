@@ -1,0 +1,135 @@
+---
+title: "Data Challenge 2e"
+output: html_document
+date: "2026-11-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(tidygraph)
+library(ggplot2)
+library(ggraph)
+library(igraph)
+library(corrplot)
+```
+
+## Caricamento dei dati
+
+```{r}
+g <- read_graph("gas.xml", format = "graphml")
+g
+```
+
+```{r}
+grafo <- as_tbl_graph(g)
+grafo
+plot(grafo)
+```
+## Confronto di Katz Centrality e Power
+
+```{r}
+# Compute power x = (1/x) A 
+#INPUT
+# A = graph adjacency matrix
+# t = precision
+# OUTPUT
+# A list with:
+# vector = power vector
+# iter = number of iterations
+
+power = function(A, t) {
+  n = dim(A)[1];
+  # x_2k
+  x0 = rep(0, n);
+  # x_2k+1
+  x1 = rep(1, n);
+  # x_2k+2
+  x2 = rep(1, n);
+  diff = 1
+  eps = 1/10^t;
+  iter = 0;
+  while (diff > eps) {
+    x0 = x1;
+    x1 = x2;
+    x2 = (1/x2) %*% A;
+    diff = sum(abs(x2 - x0));
+    iter = iter + 1;
+  } 
+  # it holds now: alpha x2 = (1/x2) A
+  alpha = ((1/x2) %*% A[,1]) / x2[1];
+  # hence sqrt(alpha) * x2 = (1/(sqrt(alpha) * x2)) A
+  x2 = sqrt(alpha) %*% x2;
+  return(list(vector = as.vector(x2), iter = iter))
+}
+```
+
+```{r}
+A = as_adjacency_matrix(grafo)
+eig = eigen(A)$values
+r = max(abs(eig))
+alpha = 0.85 / r
+```
+
+```{r}
+grafo <- grafo |>
+  activate(nodes) |>
+  mutate(katz = centrality_alpha(alpha = alpha, exo = 1))
+grafo
+```
+
+```{r}
+I <- diag(0.1, vcount(grafo))
+AI <- A + I
+potere <- power(AI, t = 4)
+potere
+```
+
+```{r}
+grafo <- grafo |>
+  activate(nodes) |>
+  mutate(power = potere$vector)
+grafo
+```
+
+```{r}
+ggplot(data = as_data_frame(grafo, what = "vertices"), mapping = aes(x = power, y = katz)) +
+  geom_point()
+```
+
+Dal grafico si nota che esistono stati potenti e centrali, potenti e non centrali, non potenti e centrali, non potenti e non centrali. Identifichiamo alcuni stati che con alti valori in una (ma non nell'altra) caratteristica.
+
+```{r}
+potenti_non_centrali <- as_data_frame(grafo, what = "vertices") |>
+  filter(power > 4, katz < 6)
+potenti_non_centrali
+```
+
+```{r}
+centrali_non_potenti <- as_data_frame(grafo, what = "vertices") |>
+  filter(power < 4, katz > 6)
+centrali_non_potenti
+```
+
+## Rappresentazioni grafiche
+
+```{r}
+ggraph(grafo, layout = "stress") +
+  geom_edge_link(aes(edge_width = weight), edge_colour = "blue") +
+  scale_edge_width(range = c(0.2, 5)) +
+  geom_node_point(aes(size = katz), colour = "green") +
+  scale_size(range = c(2, 10)) +
+  geom_node_text(aes(label = name), repel = TRUE)
+```
+
+```{r}
+ggraph(grafo, layout = "stress") +
+  geom_edge_link(aes(edge_width = weight), edge_colour = "blue") +
+  scale_edge_width(range = c(0.2, 5)) +
+  geom_node_point(aes(size = power), colour = "purple") +
+  scale_size(range = c(2, 10)) +
+  geom_node_text(aes(label = name), repel = TRUE)
+```
